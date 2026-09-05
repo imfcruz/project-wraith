@@ -1,0 +1,23 @@
+# Dependências
+node_modules/
+
+# Código compilado e cobertura
+dist/
+coverage/
+
+# Variáveis de ambiente e segredos
+.env
+.env.*
+!.env.example
+
+# Arquivos locais de ferramentas e IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Arquivos do sistema
+.DS_Store
+Thumbs.db

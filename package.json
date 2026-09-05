@@ -1,0 +1,54 @@
+{
+  "name": "project-wraith",
+  "version": "1.0.0",
+  "description": "Bot temporário de Halloween para Discord",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "node --env-file-if-exists=.env --import tsx --watch src/index.ts",
+    "start": "node --env-file-if-exists=.env dist/index.js",
+    "commands:deploy": "node --env-file-if-exists=.env --import tsx src/discord/deploy-commands.ts",
+    "db:generate": "node --env-file-if-exists=.env ./node_modules/drizzle-kit/bin.cjs generate",
+    "db:migrate": "node --env-file-if-exists=.env ./node_modules/drizzle-kit/bin.cjs migrate",
+    "db:check": "node --env-file-if-exists=.env ./node_modules/drizzle-kit/bin.cjs check",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "db:logs": "docker compose logs -f postgres",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --max-warnings=0",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "node --import tsx --test 'src/**/*.test.ts'",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run db:check && npm run build"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=24.11.0"
+  },
+  "dependencies": {
+    "discord.js": "^14.27.0",
+    "drizzle-orm": "^0.45.2",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.4.0",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.31.10",
+    "eslint": "^10.10.0",
+    "prettier": "^3.9.6",
+    "tsx": "^4.23.13",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.69.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "esbuild@0.18.20": true,
+    "esbuild@0.25.12": true
+  }
+}
