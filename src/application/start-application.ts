@@ -4,34 +4,13 @@ import { createDatabase } from '../infrastructure/database/client.js';
 import type { Logger } from '../shared/logger.js';
 
 export async function startApplication(config: AppConfig, logger: Logger): Promise<void> {
-  const database = createDatabase(config.database);
+  logger.info('Iniciando Project Wraith...');
 
-  await database.checkConnection();
-  logger.info('Conexão com PostgreSQL validada.');
+  const dbContext = createDatabase(config.database);
+  await dbContext.checkConnection();
+  logger.info('Conexão com PostgreSQL estabelecida com sucesso.');
 
-  let client;
-  try {
-    client = await createDiscordClient(config, logger);
-  } catch (error: unknown) {
-    await database.close();
-    throw error;
-  }
+  await createDiscordClient(config, logger, dbContext.db);
 
-  let shuttingDown = false;
-  const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-
-    logger.info('Encerrando aplicação.', { signal });
-    await client.destroy();
-    await database.close();
-    logger.info('Aplicação encerrada com segurança.');
-  };
-
-  process.once('SIGINT', () => {
-    void shutdown('SIGINT');
-  });
-  process.once('SIGTERM', () => {
-    void shutdown('SIGTERM');
-  });
+  logger.info('Project Wraith iniciado com sucesso.');
 }
