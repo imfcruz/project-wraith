@@ -26,6 +26,16 @@ export async function deployCommands(): Promise<void> {
       .setName('caldeirao')
       .setDescription('Exibe o progresso do Caldeirão global e o placar das equipes.'),
 
+      new SlashCommandBuilder()
+      .setName('perfil')
+      .setDescription('Consulta sua pontuação de doces e equipe no evento de Halloween.')
+      .addUserOption((opt) =>
+        opt
+          .setName('usuario')
+          .setDescription('Usuário para inspecionar o perfil (opcional)')
+          .setRequired(false)
+      ),
+
     new SlashCommandBuilder()
       .setName('setup')
       .setDescription('Configura os cargos e canais operacionais do evento.')

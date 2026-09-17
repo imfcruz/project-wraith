@@ -8,12 +8,12 @@ import {
 } from 'discord.js';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { getCauldronStatus } from '../application/cauldron/index.js';
+import { registerPlayer, getPlayerProfile } from '../application/players/index.js';
 import { eq } from 'drizzle-orm';
 import type { AppConfig } from '../config/env.js';
 import { guildConfigs } from '../infrastructure/database/schema/index.js';
 import type * as schema from '../infrastructure/database/schema/index.js';
 import type { Logger } from '../shared/logger.js';
-import { registerPlayer } from '../application/players/index.js';
 import {
   DropService,
   COLLECT_CANDY_BUTTON_ID,
@@ -117,7 +117,7 @@ export async function createDiscordClient(
           await interaction.editReply({ embeds: [embed] });
           return;
         }
-        
+
         if (interaction.commandName === 'wraith') {
           await interaction.reply(createRegistrationPanel());
           return;
