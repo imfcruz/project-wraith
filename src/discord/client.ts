@@ -4,13 +4,20 @@ import {
   GatewayIntentBits,
   MessageFlags,
   type Interaction,
+  type Message,
 } from 'discord.js';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { eq } from 'drizzle-orm';
 import type { AppConfig } from '../config/env.js';
-import { guildConfigs, type teamEnum } from '../infrastructure/database/schema/index.js';
+import { guildConfigs } from '../infrastructure/database/schema/index.js';
 import type * as schema from '../infrastructure/database/schema/index.js';
 import type { Logger } from '../shared/logger.js';
 import { registerPlayer } from '../application/players/index.js';
+import {
+  DropService,
+  COLLECT_CANDY_BUTTON_ID,
+  claimCandy,
+} from '../application/drops/index.js';
 import { createRegistrationPanel, REGISTER_BUTTON_ID } from './panel.js';
 
 export async function createDiscordClient(
@@ -22,14 +29,61 @@ export async function createDiscordClient(
     intents: [
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildMembers,
+      GatewayIntentBits.GuildMessages,
     ],
   });
+
+  const dropService = new DropService();
+
+  // Cache em memória simples das configurações da guilda para alta performance
+  let cachedConfig: typeof guildConfigs.$inferSelect | null = null;
+
+  async function getConfig(guildId: string): Promise<typeof guildConfigs.$inferSelect | null> {
+    if (cachedConfig && cachedConfig.guildId === guildId) return cachedConfig;
+    const [found] = await db
+      .select()
+      .from(guildConfigs)
+      .where(eq(guildConfigs.guildId, guildId))
+      .limit(1);
+    if (found) cachedConfig = found;
+    return found ?? null;
+  }
 
   client.once(Events.ClientReady, (readyClient) => {
     logger.info('Cliente Discord conectado.', {
       guildCount: readyClient.guilds.cache.size,
       userId: readyClient.user.id,
     });
+  });
+
+  // Handler de Mensagens para acionar Drops
+  client.on(Events.MessageCreate, async (message: Message) => {
+    if (message.author.bot || !message.guildId) return;
+
+    try {
+      const guildCfg = await getConfig(message.guildId);
+      if (!guildCfg) return;
+
+      // Restrição de canais configurados
+      const allowedChannels = guildCfg.dropChannelIds ?? [];
+      if (allowedChannels.length > 0 && !allowedChannels.includes(message.channelId)) {
+        return;
+      }
+
+      if (dropService.shouldTriggerDrop(message.channelId)) {
+        if (!message.channel.isSendable()) return;
+
+        const reward = dropService.rollCandy();
+        const dropPayload = dropService.createDropPayload(reward);
+        const dropMessage = await message.channel.send(dropPayload);
+        dropService.registerActiveDrop(dropMessage.id, reward);
+      }
+    } catch (error: unknown) {
+      logger.error('Erro ao processar verificação de drop.', {
+        error: error instanceof Error ? error.message : 'erro desconhecido',
+        channelId: message.channelId,
+      });
+    }
   });
 
   const handleInteraction = async (interaction: Interaction): Promise<void> => {
@@ -56,7 +110,7 @@ export async function createDiscordClient(
           const ghostRole = interaction.options.getRole('assombracoes', true);
           const dropChannel = interaction.options.getChannel('drop_channel');
 
-          await db
+          const updated = await db
             .insert(guildConfigs)
             .values({
               guildId: interaction.guildId,
@@ -74,7 +128,10 @@ export async function createDiscordClient(
                 dropChannelIds: dropChannel ? [dropChannel.id] : [],
                 updatedAt: new Date(),
               },
-            });
+            })
+            .returning();
+
+          cachedConfig = updated[0] ?? null;
 
           await interaction.editReply({
             content: `✅ Configuração do evento salva com sucesso!\n• **Cargo Bloqueado:** <@&${banRole.id}>\n• **Caçadores:** <@&${hunterRole.id}>\n• **Assombrações:** <@&${ghostRole.id}>`,
@@ -117,37 +174,100 @@ export async function createDiscordClient(
         }
       }
 
-      if (interaction.isButton() && interaction.customId === REGISTER_BUTTON_ID) {
-        if (!interaction.guildId || !interaction.inCachedGuild()) {
+      if (interaction.isButton()) {
+        // 1. Botão de Registro do Painel
+        if (interaction.customId === REGISTER_BUTTON_ID) {
+          if (!interaction.guildId || !interaction.inCachedGuild()) {
+            await interaction.reply({
+              content: 'Essa interação só pode ser usada em um servidor.',
+              flags: MessageFlags.Ephemeral,
+            });
+            return;
+          }
+
+          await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+          const roleIds = Array.from(interaction.member.roles.cache.keys());
+          const result = await registerPlayer(db as unknown as NodePgDatabase<Record<string, unknown>>, {
+            userId: interaction.user.id,
+            guildId: interaction.guildId,
+            memberRoleIds: roleIds,
+          });
+
+          if (!result.success) {
+            await interaction.editReply({
+              content: '❌ Você possui um cargo restrito e não pode participar das atividades deste evento.',
+            });
+            return;
+          }
+
+          const teamName = result.team === 'HUNTERS' ? '🏹 Caçadores' : '👻 Assombrações';
+          const msg = result.isNewRegistration
+            ? `🎉 Você foi alocado para a equipe **${teamName}**!`
+            : `Você já está registrado na equipe **${teamName}**.`;
+
+          await interaction.editReply({ content: msg });
+          return;
+        }
+
+        // 2. Botão de Coletar Doce
+        if (interaction.customId === COLLECT_CANDY_BUTTON_ID) {
+          if (!interaction.guildId || !interaction.inCachedGuild()) {
+            await interaction.reply({
+              content: 'Essa ação só pode ser realizada dentro do servidor.',
+              flags: MessageFlags.Ephemeral,
+            });
+            return;
+          }
+
+          const reward = dropService.claimDrop(interaction.message.id);
+
+          if (!reward) {
+            await interaction.reply({
+              content: '💨 Tarde demais! Outro participante já coletou esse doce.',
+              flags: MessageFlags.Ephemeral,
+            });
+            return;
+          }
+
+          // Trava de engajamento no resgate
+          const guildCfg = await getConfig(interaction.guildId);
+          if (
+            guildCfg?.banEngagementRoleId &&
+            interaction.member.roles.cache.has(guildCfg.banEngagementRoleId)
+          ) {
+            await interaction.reply({
+              content: '❌ Você possui um cargo restrito e não pode coletar doces.',
+              flags: MessageFlags.Ephemeral,
+            });
+            return;
+          }
+
+          const result = await claimCandy(db, {
+            userId: interaction.user.id,
+            guildId: interaction.guildId,
+            reward,
+          });
+
+          if (!result.success) {
+            await interaction.reply({
+              content: '⚠️ Você precisa entrar no evento primeiro usando `/participar` ou pelo painel.',
+              flags: MessageFlags.Ephemeral,
+            });
+            return;
+          }
+
+          // Edita a mensagem do drop desabilitando o botão e mostrando quem venceu
+          await interaction.message.edit({
+            content: `🍬 Coletado por <@${interaction.user.id}> (+${result.points} doces para **${result.team === 'HUNTERS' ? 'Caçadores' : 'Assombrações'}**)!`,
+            components: [],
+          });
+
           await interaction.reply({
-            content: 'Essa interação só pode ser usada em um servidor.',
+            content: `✨ Você garantiu **+${result.points} doces**! Saldo atual: ${result.totalUserPoints}.`,
             flags: MessageFlags.Ephemeral,
           });
-          return;
         }
-
-        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-
-        const roleIds = Array.from(interaction.member.roles.cache.keys());
-        const result = await registerPlayer(db as unknown as NodePgDatabase<Record<string, unknown>>, {
-          userId: interaction.user.id,
-          guildId: interaction.guildId,
-          memberRoleIds: roleIds,
-        });
-
-        if (!result.success) {
-          await interaction.editReply({
-            content: '❌ Você possui um cargo restrito e não pode participar das atividades deste evento.',
-          });
-          return;
-        }
-
-        const teamName = result.team === 'HUNTERS' ? '🏹 Caçadores' : '👻 Assombrações';
-        const msg = result.isNewRegistration
-          ? `🎉 Você foi alocado para a equipe **${teamName}**!`
-          : `Você já está registrado na equipe **${teamName}**.`;
-
-        await interaction.editReply({ content: msg });
       }
     } catch (error: unknown) {
       logger.error('Falha ao processar interação do Discord.', {
