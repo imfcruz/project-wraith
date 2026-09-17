@@ -18,10 +18,14 @@ export interface DatabaseContext {
 export function createDatabase(config: DatabaseConfig): DatabaseContext {
   const pool = new Pool({
     connectionString: config.url,
-    connectionTimeoutMillis: 5_000,
+    connectionTimeoutMillis: 20_000,
     idleTimeoutMillis: 30_000,
     max: config.poolMax,
+    ssl: {
+      rejectUnauthorized: false,
+    }
   });
+  
   const db = drizzle({ client: pool, schema });
 
   return {
