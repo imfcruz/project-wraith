@@ -7,6 +7,7 @@ import {
   type Message,
 } from 'discord.js';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { getCauldronStatus } from '../application/cauldron/index.js';
 import { eq } from 'drizzle-orm';
 import type { AppConfig } from '../config/env.js';
 import { guildConfigs } from '../infrastructure/database/schema/index.js';
@@ -89,6 +90,34 @@ export async function createDiscordClient(
   const handleInteraction = async (interaction: Interaction): Promise<void> => {
     try {
       if (interaction.isChatInputCommand()) {
+
+        if (interaction.commandName === 'caldeirao') {
+          await interaction.deferReply();
+
+          const status = await getCauldronStatus(db);
+
+          const filledBlocks = Math.round(status.progressPercentage / 10);
+          const emptyBlocks = 10 - filledBlocks;
+          const progressBar = '🟩'.repeat(filledBlocks) + '⬛'.repeat(emptyBlocks);
+
+          const embed = {
+            title: '🧙 Caldeirão das Bruxas — Progresso Global',
+            description:
+              `O servidor já acumulou **${status.totalCandies} doces** no caldeirão comunitário!\n\n` +
+              `**Meta do Nível ${status.currentTier + 1}:** [${progressBar}] ${status.progressPercentage}%\n` +
+              `Faltam **${Math.max(0, status.nextTierGoal - status.totalCandies)}** doces para a próxima recompensa global.\n\n` +
+              `### 🏆 Placar das Equipes\n` +
+              `🏹 **Caçadores:** ${status.huntersScore} doces\n` +
+              `👻 **Assombrações:** ${status.ghostsScore} doces\n\n` +
+              `*(A equipe vencedora garante cargos e vantagens exclusivas ao final do evento)*`,
+            color: 0x9b59b6,
+            footer: { text: 'Project Wraith • Atualizado em tempo real' },
+          };
+
+          await interaction.editReply({ embeds: [embed] });
+          return;
+        }
+        
         if (interaction.commandName === 'wraith') {
           await interaction.reply(createRegistrationPanel());
           return;
@@ -102,6 +131,7 @@ export async function createDiscordClient(
             });
             return;
           }
+          
 
           await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 

@@ -22,6 +22,10 @@ export async function deployCommands(): Promise<void> {
       .setName('participar')
       .setDescription('Entra no evento de Halloween e recebe sua equipe balanceada.'),
 
+      new SlashCommandBuilder()
+      .setName('caldeirao')
+      .setDescription('Exibe o progresso do Caldeirão global e o placar das equipes.'),
+
     new SlashCommandBuilder()
       .setName('setup')
       .setDescription('Configura os cargos e canais operacionais do evento.')
